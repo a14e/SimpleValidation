@@ -1,10 +1,10 @@
 package a14e.validation
 
-import a14e.validation.containers.{BuildingValidatorContainer, CheckContainer, OptValidatorContainer, SeqValidatorContainer, ValidationCheck, ValidationContainer, ValidatorContainer}
+import a14e.validation.containers.{AsyncCheckContainer, AsyncValidationCheck, BuildingValidatorContainer, MappingValidatorContainer, OptValidatorContainer, SeqValidatorContainer, SyncCheckContainer, SyncValidationCheck, ValidationContainer, ValidatorContainer}
 import a14e.validation.results.ValidationError
+import a14e.validation.utils.FutureUtils
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, Materializer}
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.ActorMaterializer
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.immutable
@@ -33,7 +33,7 @@ trait Validator[T, MARKER] {
           v.firstFail(x).flatMap {
             case res@Some(_) => Future.successful(res)
             case _ => recursiveSearch(tail)
-          }
+          }(FutureUtils.sameThreadExecutionContext)
         case _ => Future.successful(None)
       }
     }
@@ -48,20 +48,18 @@ trait Validator[T, MARKER] {
   def firstFailWith(x: T)
                    (markersToError: Option[MARKER] => Option[Throwable])
                    (implicit
-                    materializer: Materializer,
                     executionContext: ExecutionContext): Future[Unit] = {
     firstFail(x).flatMap { markers =>
       markersToError(markers) match {
         case Some(error) => Future.failed(error)
         case None => Future.unit
       }
-    }
+    }(FutureUtils.sameThreadExecutionContext)
   }
 
   def firstFailWithErr(x: T)
                       (markersToError: Option[MARKER] => Throwable)
                       (implicit
-                       materializer: Materializer,
                        executionContext: ExecutionContext): Future[Unit] = {
     firstFailWith(x)(res => Some(markersToError(res)))
   }
@@ -70,7 +68,6 @@ trait Validator[T, MARKER] {
                parallelLevel: Int = 1)
               (markersToError: immutable.Seq[MARKER] => Option[Throwable])
               (implicit
-               materializer: Materializer,
                executionContext: ExecutionContext): Future[Unit] = {
     collectFails(x, parallelLevel)
       .flatMap { markers =>
@@ -78,14 +75,13 @@ trait Validator[T, MARKER] {
           case Some(error) => Future.failed(error)
           case None => Future.unit
         }
-      }
+      }(FutureUtils.sameThreadExecutionContext)
   }
 
   def failWithErr(x: T,
                   parallelLevel: Int = 1)
                  (markersToError: immutable.Seq[MARKER] => Throwable)
                  (implicit
-                  materializer: Materializer,
                   executionContext: ExecutionContext): Future[Unit] = {
     failWith(x, parallelLevel)(res => Some(markersToError(res)))
   }
@@ -93,29 +89,19 @@ trait Validator[T, MARKER] {
   def collectFails(x: T,
                    parallelLevel: Int = 1)
                   (implicit
-                   materializer: Materializer,
                    executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    val checksList = validations()
-
-    Source(checksList)
-      .mapAsync(parallelLevel)(_.collectFails(x))
-      .mapConcat(x => x)
-      .runWith(Sink.seq)
+    FutureUtils.batched(validations(), parallelLevel)(_.collectFails(x))
+      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
 
   def collectSuccesses(x: T,
                        parallelLevel: Int = 1)
-                      (implicit executionContext: ExecutionContext,
-                       materializer: Materializer): Future[immutable.Seq[MARKER]] = {
+                      (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    val checksList = validations()
-
-    Source(checksList)
-      .mapAsync(parallelLevel)(_.collectSuccesses(x))
-      .mapConcat(x => x)
-      .runWith(Sink.seq)
+    FutureUtils.batched(validations(), parallelLevel)(_.collectSuccesses(x))
+      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
   def firstSuccess(x: T)
@@ -127,7 +113,7 @@ trait Validator[T, MARKER] {
           v.firstSuccess(x).flatMap {
             case res@Some(_) => Future.successful(res)
             case _ => recursiveSearch(tail)
-          }
+          }(FutureUtils.sameThreadExecutionContext)
         case _ => Future.successful(None)
       }
     }
@@ -136,46 +122,6 @@ trait Validator[T, MARKER] {
       recursiveSearch(validations())
     } catch {
       case NonFatal(e) => Future.failed(e)
-    }
-  }
-
-  protected def ruleAsync(marker: MARKER)
-                         (block: T => Future[Boolean]): Unit = {
-    checks += CheckContainer(ValidationCheck(marker, block))
-  }
-
-  protected def rule(marker: MARKER)
-                    (block: T => Boolean): Unit = {
-    ruleAsync(marker) { x =>
-      try {
-        Future.successful(block(x))
-      } catch {
-        case NonFatal(e) => Future.failed(e)
-      }
-    }
-  }
-
-  protected def register(v: Validator[T, MARKER]): Unit = {
-    checks += ValidatorContainer(v)
-  }
-
-  protected def registerOnSeq[B](extract: T => immutable.Seq[B])(v: Validator[B, MARKER]): Unit = {
-    checks += SeqValidatorContainer[T, B, MARKER](v, extract)
-  }
-
-  protected def registerOnOpt[B](extract: T => Option[B])(v: Validator[B, MARKER]): Unit = {
-    checks += OptValidatorContainer[T, B, MARKER](v, extract)
-  }
-
-
-  protected def registerOnFunc[B](build: T => Validator[T, MARKER]): Unit = {
-    checks += BuildingValidatorContainer[T, MARKER](build)
-  }
-
-  protected def registerOn[B](extract: T => B)(builder: PartialFunction[B, Validator[T, MARKER]]): Unit = {
-    registerOnFunc { obj =>
-      val input = extract(obj)
-      builder.applyOrElse(input, (_: B) => Validator.empty[T, MARKER])
     }
   }
 
@@ -199,10 +145,50 @@ trait Validator[T, MARKER] {
     new Validator[T, MARKER] {
       checks ++= self.checks
       checks ++= other.checks
-
     }
-
   }
+
+  protected def ruleAsync(marker: MARKER)
+                         (block: T => Future[Boolean]): Unit = {
+    checks += AsyncCheckContainer(AsyncValidationCheck(marker, block))
+  }
+
+  protected def rule(marker: MARKER)
+                    (block: T => Boolean): Unit = {
+    checks += SyncCheckContainer(SyncValidationCheck(marker, block))
+  }
+
+  protected def register(v: Validator[T, MARKER]): Unit = {
+    checks += ValidatorContainer(v)
+  }
+
+  protected def registerOnSeq[B](extract: T => immutable.Seq[B])(v: Validator[B, MARKER]): Unit = {
+    checks += SeqValidatorContainer[T, B, MARKER](v, extract)
+  }
+
+  protected def registerOnOpt[B](extract: T => Option[B])(v: Validator[B, MARKER]): Unit = {
+    checks += OptValidatorContainer[T, B, MARKER](v, extract)
+  }
+
+
+  protected def registerOnFunc[B](build: T => Validator[T, MARKER]): Unit = {
+    checks += BuildingValidatorContainer[T, MARKER](build)
+  }
+
+  protected def registerOnMapping[KEY](extract: T => KEY)(builder: (KEY, Validator[T, MARKER])*): Unit = {
+    val mapping = builder.groupBy { case (k, _) => k }.mapValues { validators =>
+      validators.map { case (_, v) => v }.reduce(_ ++ _)
+    }
+    checks += MappingValidatorContainer(extract, mapping)
+  }
+
+  protected def registerPartial[B](extract: T => B)(builder: PartialFunction[B, Validator[T, MARKER]]): Unit = {
+    registerOnFunc { obj =>
+      val input = extract(obj)
+      builder.applyOrElse(input, (_: B) => Validator.empty[T, MARKER])
+    }
+  }
+
 
   protected val checks = new ArrayBuffer[ValidationContainer[T, MARKER]]()
 }
@@ -212,6 +198,8 @@ trait Validator[T, MARKER] {
 case class MyUser(age: Int,
                   name: String,
                   phone: String)
+
+
 
 class PhoneValidation extends Validator[String, ValidationError] {
   rule("Телефон должен подходить по формату") { phone =>
@@ -236,18 +224,14 @@ class UserValidation extends Validator[MyUser, ValidationError] {
       .contramap(_.phone)
   }
 
-  registerOn(_.phone) {
+  registerPartial(_.phone) {
     case "phone123" => new PhoneValidation().contramap(_.phone)
     case "phone1234" => new PhoneValidation().contramap(_.phone)
   }
-
 }
 
 object Test extends App {
-  implicit val actorSystem = ActorSystem()
-  implicit val materializer = ActorMaterializer()
-
-  import actorSystem.dispatcher
+  import ExecutionContext.Implicits.global
 
   val user = MyUser(33, "a" * 30, "+7012345789")
 
@@ -255,12 +239,17 @@ object Test extends App {
 
   //  val mockUserValidation = mock[UserValidation]
 
-  val resultErrorsFuture = validator.collectFails(user)
-  val resultErrors = Await.result(resultErrorsFuture, Duration.Inf)
-  println(resultErrors)
+  for (_ <- 0 to 100) {
+    val t1 = System.nanoTime()
+    val resultErrorsFuture = validator.collectFails(user)
+    val resultErrors = Await.result(resultErrorsFuture, Duration.Inf)
+    val t2 = System.nanoTime()
+    println(s"${(t2 - t1).toDouble / 1000000.0} ms")
+    println(resultErrors)
+  }
 
   val resultErrorFuture = validator.failWithErr(user)(errs => new RuntimeException(errs.mkString(", ")))
   val r = Await.ready(resultErrorFuture, Duration.Inf)
   println(r)
-  actorSystem.terminate()
+//  actorSystem.terminate()
 }
