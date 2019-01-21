@@ -6,9 +6,12 @@ import scala.concurrent.{ExecutionContext, Future}
 
 private[validation] object FutureUtils {
 
+  /**
+    * executes futures one by one
+    **/
   def serially[T, B](xs: immutable.Seq[T])
                     (f: T => Future[B]): Future[immutable.Seq[B]] = {
-    implicit val ctx = sameThreadExecutionContext
+    implicit val ctx: ExecutionContext = sameThreadExecutionContext
 
     xs.foldLeft(Future.successful(List.newBuilder[B])) { (prevFuture, x) =>
       for {
@@ -19,17 +22,17 @@ private[validation] object FutureUtils {
   }
 
 
-  def batched[T, B](xs: immutable.Seq[T], batch: Int)
+  def batched[T, B](xs: immutable.Seq[T], batcSize: Int)
                    (f: T => Future[B])
                    (implicit ctx: ExecutionContext): Future[immutable.Seq[B]] = {
 
-    if (batch == 1) serially(xs)(f)
-    else xs.grouped(batch).foldLeft(Future.successful(List.newBuilder[B])) { (prevFuture, group) =>
+    if (batcSize == 1) serially(xs)(f)
+    else xs.iterator.grouped(batcSize).foldLeft(Future.successful(List.newBuilder[B])) { (prevFuture, group) =>
       for {
         builder <- prevFuture
         elems <- Future.traverse(group)(f)
       } yield builder ++= elems
-    }.map(_.result())
+    }.map(_.result())(sameThreadExecutionContext)
   }
 
   val sameThreadExecutionContext: ExecutionContext = new ExecutionContext {

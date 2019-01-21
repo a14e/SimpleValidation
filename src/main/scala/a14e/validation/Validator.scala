@@ -11,7 +11,7 @@ import scala.collection.immutable
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.language.implicitConversions
-import scala.util.Try
+import scala.util.{Random, Try}
 import scala.util.control.NonFatal
 
 
@@ -22,6 +22,7 @@ object Validator {
 trait Validator[T, MARKER] {
   self =>
 
+  type ThisValidator = Validator[T, MARKER]
 
   def firstFail(x: T)
                (implicit
@@ -176,9 +177,9 @@ trait Validator[T, MARKER] {
   }
 
   protected def registerOnMapping[KEY](extract: T => KEY)(builder: (KEY, Validator[T, MARKER])*): Unit = {
-    val mapping = builder.groupBy { case (k, _) => k }.mapValues { validators =>
-      validators.map { case (_, v) => v }.reduce(_ ++ _)
-    }
+    val mapping = builder.groupBy { case (k, _) => k }
+      .mapValues(validators => validators.map { case (_, v) => v }.reduce(_ ++ _))
+      .map(identity) // remove lazyness
     checks += MappingValidatorContainer(extract, mapping)
   }
 
@@ -224,6 +225,7 @@ class UserValidation extends Validator[MyUser, ValidationError] {
       .contramap(_.phone)
   }
 
+
   registerPartial(_.phone) {
     case "phone123" => new PhoneValidation().contramap(_.phone)
     case "phone1234" => new PhoneValidation().contramap(_.phone)
@@ -233,13 +235,13 @@ class UserValidation extends Validator[MyUser, ValidationError] {
 object Test extends App {
   import ExecutionContext.Implicits.global
 
-  val user = MyUser(33, "a" * 30, "+7012345789")
+  def user = MyUser(33 + Random.nextInt(2), "a" * 30, "phone123")
 
   val validator = new UserValidation()
 
   //  val mockUserValidation = mock[UserValidation]
 
-  for (_ <- 0 to 100) {
+  for (_ <- 0 to 40000) {
     val t1 = System.nanoTime()
     val resultErrorsFuture = validator.collectFails(user)
     val resultErrors = Await.result(resultErrorsFuture, Duration.Inf)

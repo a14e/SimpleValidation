@@ -33,6 +33,7 @@ trait ValidationContainer[T, MARKER] {
 }
 
 
+
 case class SyncCheckContainer[T, MARKER](check: SyncValidationCheck[T, MARKER]) extends ValidationContainer[T, MARKER] {
 
   override def contramap[B](f: B => T): ValidationContainer[B, MARKER] = SyncCheckContainer(check.contramap(f))
@@ -86,6 +87,7 @@ case class SyncCheckContainer[T, MARKER](check: SyncValidationCheck[T, MARKER]) 
     }
   }
 }
+
 
 case class AsyncCheckContainer[T, MARKER](check: AsyncValidationCheck[T, MARKER]) extends ValidationContainer[T, MARKER] {
 
@@ -206,14 +208,14 @@ case class MappingValidatorContainer[T, KEY, MARKER](extractKey: T => KEY,
 
     MappingValidatorContainer(
       f.andThen(extractKey),
-      mapping.mapValues(_.contramap(f)).map(identity)
+      mapping.mapValues(_.contramap(f)).map(identity) // map(identity) removes lazyness
     )
   }
 
   override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): MappingValidatorContainer[T, KEY, NEW_MARKER] = {
     MappingValidatorContainer(
       extractKey,
-      mapping.mapValues(_.mapMarkers(f)).map(identity)
+      mapping.mapValues(_.mapMarkers(f)).map(identity) // map(identity) removes lazyness
     )
   }
 
