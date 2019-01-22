@@ -3,8 +3,6 @@ package a14e.validation
 import a14e.validation.containers.{AsyncCheckContainer, AsyncValidationCheck, BuildingValidatorContainer, MappingValidatorContainer, OptValidatorContainer, SeqValidatorContainer, SyncCheckContainer, SyncValidationCheck, ValidationContainer, ValidatorContainer}
 import a14e.validation.results.ValidationError
 import a14e.validation.utils.FutureUtils
-import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.immutable
@@ -17,6 +15,14 @@ import scala.util.control.NonFatal
 
 object Validator {
   def empty[T, MARKER]: Validator[T, MARKER] = new Validator[T, MARKER] {}
+
+  def from[T, MARKER](seq: TraversableOnce[ValidationContainer[T, MARKER]]): Validator[T, MARKER] = {
+
+    new Validator[T, MARKER] {
+      this.checks ++= seq
+    }
+
+  }
 }
 
 trait Validator[T, MARKER] {
@@ -30,8 +36,8 @@ trait Validator[T, MARKER] {
 
     def recursiveSearch(checks: immutable.Seq[ValidationContainer[T, MARKER]]): Future[Option[MARKER]] = {
       checks match {
-        case v +: tail =>
-          v.firstFail(x).flatMap {
+        case head +: tail =>
+          head.firstFail(x).flatMap {
             case res@Some(_) => Future.successful(res)
             case _ => recursiveSearch(tail)
           }(FutureUtils.sameThreadExecutionContext)
@@ -40,7 +46,7 @@ trait Validator[T, MARKER] {
     }
 
     try {
-      recursiveSearch(validations())
+      recursiveSearch(validationsList())
     } catch {
       case NonFatal(e) => Future.failed(e)
     }
@@ -92,7 +98,7 @@ trait Validator[T, MARKER] {
                   (implicit
                    executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    FutureUtils.batched(validations(), parallelLevel)(_.collectFails(x))
+    FutureUtils.batched(validationsList(), parallelLevel)(_.collectFails(x))
       .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
@@ -101,7 +107,7 @@ trait Validator[T, MARKER] {
                        parallelLevel: Int = 1)
                       (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    FutureUtils.batched(validations(), parallelLevel)(_.collectSuccesses(x))
+    FutureUtils.batched(validationsList(), parallelLevel)(_.collectSuccesses(x))
       .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
@@ -120,33 +126,27 @@ trait Validator[T, MARKER] {
     }
 
     try {
-      recursiveSearch(validations())
+      recursiveSearch(validationsList())
     } catch {
       case NonFatal(e) => Future.failed(e)
     }
   }
 
 
-  def validations(): immutable.Seq[ValidationContainer[T, MARKER]] = checks.toList
+  def validationsList(): immutable.Seq[ValidationContainer[T, MARKER]] = checks.toList
 
   def contramap[B](f: B => T): Validator[B, MARKER] = {
-    new Validator[B, MARKER] {
-      checks ++= self.checks.map(_.contramap(f))
-    }
+
+    Validator.from(checks.map(_.contramap(f)))
   }
 
   def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): Validator[T, NEW_MARKER] = {
-    new Validator[T, NEW_MARKER] {
-      checks ++= self.checks.map(_.mapMarkers(f))
-
-    }
+    Validator.from(checks.map(_.mapMarkers(f)))
   }
 
   def ++(other: Validator[T, MARKER]): Validator[T, MARKER] = {
-    new Validator[T, MARKER] {
-      checks ++= self.checks
-      checks ++= other.checks
-    }
+    Validator.from(self.checks ++ other.checks)
+
   }
 
   protected def ruleAsync(marker: MARKER)
@@ -235,7 +235,7 @@ class UserValidation extends Validator[MyUser, ValidationError] {
 object Test extends App {
   import ExecutionContext.Implicits.global
 
-  def user = MyUser(33 + Random.nextInt(2), "a" * 30, "phone123")
+  def user = MyUser(33 + Random.nextInt(2), "a" * (30 + Random.nextInt(2)), "phone123" + Random.nextInt(2))
 
   val validator = new UserValidation()
 

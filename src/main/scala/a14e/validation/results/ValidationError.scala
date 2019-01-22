@@ -22,5 +22,4 @@ object ErrorBuilder {
 
   implicit def fromText[T](text: String): ErrorBuilder[T] = ErrorBuilder[T](_ => ValidationError(text))
 
-
 }

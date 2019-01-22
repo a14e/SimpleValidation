@@ -10,7 +10,9 @@ crossScalaVersions := Seq("2.11.8", "2.12.4")
 
 
 libraryDependencies ++= Seq(
-  "com.typesafe.akka" %% "akka-stream" % "2.5.19",
+
+  "junit" % "junit" % "4.11" % "test",
+  "org.mockito" % "mockito-all" % "1.10.19" % "test",
   "org.scalatest" %% "scalatest" % "3.0.4" % "test"
 )
 

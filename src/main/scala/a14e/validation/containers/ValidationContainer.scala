@@ -91,9 +91,9 @@ case class SyncCheckContainer[T, MARKER](check: SyncValidationCheck[T, MARKER]) 
 
 case class AsyncCheckContainer[T, MARKER](check: AsyncValidationCheck[T, MARKER]) extends ValidationContainer[T, MARKER] {
 
-  override def contramap[B](f: B => T): ValidationContainer[B, MARKER] = AsyncCheckContainer(check.contramap(f))
+  override def contramap[B](f: B => T): AsyncCheckContainer[B, MARKER] = AsyncCheckContainer(check.contramap(f))
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): ValidationContainer[T, NEW_MARKER] = {
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): AsyncCheckContainer[T, NEW_MARKER] = {
     AsyncCheckContainer(check.copy(marker = f(check.marker)))
   }
 
