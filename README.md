@@ -23,6 +23,9 @@ class DogValidator extends Validator[String, ValidationError] {
 }
 
 class TestValidator extends Validator[Animal, ValidationError] {
+
+  rule("bad type") { animal => animal.`type` == "cat" || animal.`type` == "dog" }
+
   registerOnFunc {
     case Animal(_, "cat") => new CatValidator().contramap(_.sound)
     case Animal(_, "dog") => new DogValidator().contramap(_.sound)
@@ -31,6 +34,9 @@ class TestValidator extends Validator[Animal, ValidationError] {
 
 new TestValidator().firstFail(Animal("meow", "cat")).futureValue shouldBe None
 new TestValidator().firstFail(Animal("woof", "dog")).futureValue shouldBe None
+
+
+new TestValidator().firstFail(Animal("woof", "snake")).futureValue shouldBe Some(ValidationError("bad type"))
 
 new TestValidator().firstFail(Animal("meow", "dog")).futureValue shouldBe Some(ValidationError("bad dog"))
 new TestValidator().firstFail(Animal("woof", "cat")).futureValue shouldBe Some(ValidationError("bad cat"))

@@ -22,12 +22,12 @@ private[validation] object FutureUtils {
   }
 
 
-  def batched[T, B](xs: immutable.Seq[T], batcSize: Int)
+  def batched[T, B](xs: immutable.Seq[T], batchSize: Int)
                    (f: T => Future[B])
                    (implicit ctx: ExecutionContext): Future[immutable.Seq[B]] = {
 
-    if (batcSize == 1) serially(xs)(f)
-    else xs.iterator.grouped(batcSize).foldLeft(Future.successful(List.newBuilder[B])) { (prevFuture, group) =>
+    if (batchSize == 1) serially(xs)(f)
+    else xs.iterator.grouped(batchSize).foldLeft(Future.successful(List.newBuilder[B])) { (prevFuture, group) =>
       for {
         builder <- prevFuture
         elems <- Future.traverse(group)(f)

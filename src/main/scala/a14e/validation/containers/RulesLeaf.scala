@@ -1,6 +1,6 @@
 package a14e.validation.containers
 
-import a14e.validation.Validator
+import a14e.validation.RuleEngine
 import a14e.validation.utils.FutureUtils
 
 import scala.collection.immutable
@@ -8,11 +8,11 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
 
-trait ValidationContainer[T, MARKER] {
+trait RulesLeaf[T, MARKER] {
 
-  def contramap[B](f: B => T): ValidationContainer[B, MARKER]
+  def contramap[B](f: B => T): RulesLeaf[B, MARKER]
 
-  def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): ValidationContainer[T, NEW_MARKER]
+  def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesLeaf[T, NEW_MARKER]
 
   def collectFails(x: T)
                   (implicit
@@ -34,12 +34,12 @@ trait ValidationContainer[T, MARKER] {
 
 
 
-case class SyncCheckContainer[T, MARKER](check: SyncValidationCheck[T, MARKER]) extends ValidationContainer[T, MARKER] {
+case class SyncCheckLeaf[T, MARKER](check: SyncRulesCheck[T, MARKER]) extends RulesLeaf[T, MARKER] {
 
-  override def contramap[B](f: B => T): ValidationContainer[B, MARKER] = SyncCheckContainer(check.contramap(f))
+  override def contramap[B](f: B => T): SyncCheckLeaf[B, MARKER] = SyncCheckLeaf(check.contramap(f))
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): ValidationContainer[T, NEW_MARKER] = {
-    SyncCheckContainer(check.copy(marker = f(check.marker)))
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): SyncCheckLeaf[T, NEW_MARKER] = {
+    SyncCheckLeaf(check.copy(marker = f(check.marker)))
   }
 
   override def collectFails(x: T)
@@ -89,12 +89,12 @@ case class SyncCheckContainer[T, MARKER](check: SyncValidationCheck[T, MARKER]) 
 }
 
 
-case class AsyncCheckContainer[T, MARKER](check: AsyncValidationCheck[T, MARKER]) extends ValidationContainer[T, MARKER] {
+case class AsyncCheckLeaf[T, MARKER](check: AsyncRulesCheck[T, MARKER]) extends RulesLeaf[T, MARKER] {
 
-  override def contramap[B](f: B => T): AsyncCheckContainer[B, MARKER] = AsyncCheckContainer(check.contramap(f))
+  override def contramap[B](f: B => T): AsyncCheckLeaf[B, MARKER] = AsyncCheckLeaf(check.contramap(f))
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): AsyncCheckContainer[T, NEW_MARKER] = {
-    AsyncCheckContainer(check.copy(marker = f(check.marker)))
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): AsyncCheckLeaf[T, NEW_MARKER] = {
+    AsyncCheckLeaf(check.copy(marker = f(check.marker)))
   }
 
   override def collectFails(x: T)
@@ -136,45 +136,47 @@ case class AsyncCheckContainer[T, MARKER](check: AsyncValidationCheck[T, MARKER]
   }
 }
 
-case class ValidatorContainer[T, MARKER](validator: Validator[T, MARKER]) extends ValidationContainer[T, MARKER] {
+case class EngineLeaf[T, MARKER](engine: RuleEngine[T,  MARKER]) extends RulesLeaf[T, MARKER] {
 
-  override def contramap[B](f: B => T): ValidationContainer[B, MARKER] = ValidatorContainer(validator.contramap(f))
+  override def contramap[B](f: B => T): EngineLeaf[B, MARKER] = EngineLeaf(engine.contramap(f))
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): ValidationContainer[T, NEW_MARKER] = {
-    ValidatorContainer(validator.mapMarkers(f))
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesLeaf[T, NEW_MARKER] = {
+    EngineLeaf(engine.mapMarkers(f))
   }
 
   override def collectFails(x: T)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    validator.collectFails(x)
+    engine.collectFails(x)
   }
 
   override def firstFail(x: T)
                         (implicit
                          executionContext: ExecutionContext): Future[Option[MARKER]] = {
-    validator.firstFail(x)
+    engine.firstFail(x)
   }
   override def collectSuccesses(x: T)
                                (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    validator.collectSuccesses(x)
+    engine.collectSuccesses(x)
   }
 
   override def firstSuccess(x: T)
                            (implicit executionContext: ExecutionContext): Future[Option[MARKER]] = {
-    validator.firstSuccess(x)
+    engine.firstSuccess(x)
   }
 }
 
-case class BuildingValidatorContainer[T, MARKER](build: T => Validator[T, MARKER]) extends ValidationContainer[T, MARKER] {
-  override def contramap[B](f: B => T): BuildingValidatorContainer[B, MARKER] = BuildingValidatorContainer {
-    x =>
+case class BuildingEngineLeaf[T, MARKER](build: T => RuleEngine[T, MARKER]) extends RulesLeaf[T, MARKER] {
+
+  override def contramap[B](f: B => T): BuildingEngineLeaf[B, MARKER] = {
+    BuildingEngineLeaf { x =>
       build(f(x)).contramap(f)
+    }
   }
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): ValidationContainer[T, NEW_MARKER] = {
-    BuildingValidatorContainer { x =>
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesLeaf[T, NEW_MARKER] = {
+    BuildingEngineLeaf { x =>
       build(x).mapMarkers(f)
     }
   }
@@ -199,69 +201,26 @@ case class BuildingValidatorContainer[T, MARKER](build: T => Validator[T, MARKER
 
     build(x).firstSuccess(x)
   }
+
 }
 
-case class MappingValidatorContainer[T, KEY, MARKER](extractKey: T => KEY,
-                                                     mapping: Map[KEY, Validator[T, MARKER]]) extends ValidationContainer[T, MARKER] {
+case class SeqEngineLeaf[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
+                                           readSeq: T => immutable.Seq[ENTRY]) extends RulesLeaf[T, MARKER] {
 
-  override def contramap[B](f: B => T): MappingValidatorContainer[B, KEY, MARKER] = {
-
-    MappingValidatorContainer(
-      f.andThen(extractKey),
-      mapping.mapValues(_.contramap(f)).map(identity) // map(identity) removes lazyness
-    )
+  override def contramap[B](f: B => T) = {
+    SeqEngineLeaf(engine, f andThen readSeq)
   }
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): MappingValidatorContainer[T, KEY, NEW_MARKER] = {
-    MappingValidatorContainer(
-      extractKey,
-      mapping.mapValues(_.mapMarkers(f)).map(identity) // map(identity) removes lazyness
-    )
-  }
-
-  override def collectFails(x: T)
-                           (implicit
-                            executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    resolveValidator(x).collectFails(x)
-  }
-
-  override def firstFail(x: T)
-                        (implicit
-                         executionContext: ExecutionContext): Future[Option[MARKER]] = {
-    resolveValidator(x).firstFail(x)
-  }
-  override def collectSuccesses(x: T)
-                               (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    resolveValidator(x).collectSuccesses(x)
-  }
-
-  override def firstSuccess(x: T)(implicit executionContext: ExecutionContext): Future[Option[MARKER]] = {
-
-    resolveValidator(x).firstSuccess(x)
-  }
-
-  private def resolveValidator(x: T): Validator[T, MARKER] = {
-    val key = extractKey(x)
-    mapping.getOrElse(key, Validator.empty)
-  }
-}
-
-case class SeqValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, MARKER],
-                                                   readSeq: T => immutable.Seq[ENTRY]) extends ValidationContainer[T, MARKER] {
-
-  override def contramap[B](f: B => T): SeqValidatorContainer[B, ENTRY, MARKER] = {
-    SeqValidatorContainer(validator, f.andThen(readSeq))
-  }
-
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): SeqValidatorContainer[T, ENTRY, NEW_MARKER] = {
-    SeqValidatorContainer(validator.mapMarkers(f), readSeq)
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): SeqEngineLeaf[T, ENTRY, NEW_MARKER] = {
+    SeqEngineLeaf(engine.mapMarkers(f), readSeq)
   }
 
   override def collectFails(x: T)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    FutureUtils.serially(readSeq(x))(validator.collectFails(_)).map(_.flatten)(FutureUtils.sameThreadExecutionContext)
+    FutureUtils.serially(readSeq(x))(engine.collectFails(_))
+      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
   override def firstFail(x: T)
@@ -270,7 +229,7 @@ case class SeqValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
 
     def recFind(xs: Seq[ENTRY]): Future[Option[MARKER]] = xs match {
       case head +: tail =>
-        validator.firstFail(head).flatMap {
+        engine.firstFail(head).flatMap {
           case s@Some(_) => Future.successful(s)
           case _ => recFind(tail)
         }(FutureUtils.sameThreadExecutionContext)
@@ -283,7 +242,8 @@ case class SeqValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
 
   override def collectSuccesses(x: T)
                                (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    FutureUtils.serially(readSeq(x))(validator.collectSuccesses(_)).map(_.flatten)(FutureUtils.sameThreadExecutionContext)
+    FutureUtils.serially(readSeq(x))(engine.collectSuccesses(_))
+      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
   override def firstSuccess(x: T)
@@ -291,7 +251,7 @@ case class SeqValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
 
     def recFind(xs: Seq[ENTRY]): Future[Option[MARKER]] = xs match {
       case head +: tail =>
-        validator.firstSuccess(head).flatMap {
+        engine.firstSuccess(head).flatMap {
           case s@Some(_) => Future.successful(s)
           case _ => recFind(tail)
         }(FutureUtils.sameThreadExecutionContext)
@@ -304,15 +264,15 @@ case class SeqValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
 
 }
 
-case class OptValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, MARKER],
-                                                   readOpt: T => Option[ENTRY]) extends ValidationContainer[T, MARKER] {
+case class OptEngineLeaf[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
+                                           readOpt: T => Option[ENTRY]) extends RulesLeaf[T, MARKER] {
 
-  override def contramap[B](f: B => T): OptValidatorContainer[B, ENTRY, MARKER] = {
-    OptValidatorContainer(validator, f.andThen(readOpt))
+  override def contramap[B](f: B => T): OptEngineLeaf[B, ENTRY, MARKER] = {
+    OptEngineLeaf(engine, f.andThen(readOpt))
   }
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): OptValidatorContainer[T, ENTRY, NEW_MARKER] = {
-    OptValidatorContainer(validator.mapMarkers(f), readOpt)
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): OptEngineLeaf[T, ENTRY, NEW_MARKER] = {
+    OptEngineLeaf(engine.mapMarkers(f), readOpt)
   }
 
   override def collectFails(in: T)
@@ -320,7 +280,7 @@ case class OptValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
     readOpt(in) match {
-      case Some(value) => validator.collectFails(value)
+      case Some(value) => engine.collectFails(value)
       case None => Future.successful(Nil)
     }
   }
@@ -329,7 +289,7 @@ case class OptValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
                         (implicit
                          executionContext: ExecutionContext): Future[Option[MARKER]] = {
     readOpt(in) match {
-      case Some(value) => validator.firstFail(value)
+      case Some(value) => engine.firstFail(value)
       case None => Future.successful(None)
     }
   }
@@ -339,7 +299,7 @@ case class OptValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
 
 
     readOpt(in) match {
-      case Some(value) => validator.collectSuccesses(value)
+      case Some(value) => engine.collectSuccesses(value)
       case None => Future.successful(Nil)
     }
   }
@@ -348,7 +308,7 @@ case class OptValidatorContainer[T, ENTRY, MARKER](validator: Validator[ENTRY, M
 
 
     readOpt(x) match {
-      case Some(value) => validator.firstSuccess(value)
+      case Some(value) => engine.firstSuccess(value)
       case None => Future.successful(None)
     }
   }
