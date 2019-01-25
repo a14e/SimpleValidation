@@ -655,7 +655,7 @@ class RuleEngineSpec extends DefaultSpec {
 
     new TestValidator().collectSuccesses(Numbers("5" :: "1" :: Nil)).futureValue shouldBe Seq("starts with 1")
     new TestValidator().collectSuccesses(Numbers("6" :: "2" :: Nil)).futureValue shouldBe Seq("ends with 2")
-    new TestValidator().collectSuccesses(Numbers("42" :: "1" :: Nil)).futureValue shouldBe Seq("ends with 2", "starts with 1")
+    new TestValidator().collectSuccesses(Numbers("42" :: "1" :: Nil), 2).futureValue shouldBe Seq("ends with 2", "starts with 1")
   }
 
 
@@ -682,7 +682,7 @@ class RuleEngineSpec extends DefaultSpec {
 
     new TestValidator().collectSuccesses(Number(Some("1"))).futureValue shouldBe Seq("starts with 1")
     new TestValidator().collectSuccesses(Number(Some("2"))).futureValue shouldBe Seq("ends with 2")
-    new TestValidator().collectSuccesses(Number(Some("142"))).futureValue shouldBe Seq("ends with 2", "starts with 1")
+    new TestValidator().collectSuccesses(Number(Some("142")), 2).futureValue shouldBe Seq("ends with 2", "starts with 1")
   }
 
 
@@ -799,7 +799,7 @@ class RuleEngineSpec extends DefaultSpec {
     new TestValidator().collectSuccesses(Animal("woof", "dog")).futureValue shouldBe Nil
 
     new TestValidator().collectSuccesses(Animal("meow", "dog")).futureValue shouldBe TextResult("bad dog") :: Nil
-    new TestValidator().collectSuccesses(Animal("woof", "cat")).futureValue shouldBe TextResult("bad cat") :: Nil
+    new TestValidator().collectSuccesses(Animal("woof", "cat"),2).futureValue shouldBe TextResult("bad cat") :: Nil
 
   }
 

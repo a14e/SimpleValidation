@@ -1,11 +1,12 @@
 package a14e.validation
 
-import a14e.validation.containers.{AsyncCheckLeaf, AsyncRulesCheck, BuildingEngineLeaf, OptEngineLeaf, SeqEngineLeaf, SyncCheckLeaf, SyncRulesCheck, RulesLeaf, EngineLeaf}
+import a14e.validation.containers.{AsyncCheckNode, BuildingEngineNode, EngineNode, OptEngineNode, RulesNode, SeqEngineNode, SyncCheckNode}
 import a14e.validation.results.TextResult
 import a14e.validation.utils.FutureUtils
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.immutable
+import scala.collection.immutable.VectorBuilder
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.language.implicitConversions
@@ -14,14 +15,14 @@ import scala.util.control.NonFatal
 
 
 object RuleEngine {
-  def empty[INPUT, MARKER]: RuleEngine[INPUT, MARKER] = {
-    new RuleEngine[INPUT, MARKER] {}
+  def empty[INPUT, OUT]: RuleEngine[INPUT, OUT] = {
+    new RuleEngine[INPUT, OUT] {}
   }
 
-  def from[INPUT, MARKER](seq: TraversableOnce[RulesLeaf[INPUT, MARKER]]): RuleEngine[INPUT, MARKER] = {
+  def from[INPUT, OUT](seq: Seq[RulesNode[INPUT, OUT]]): RuleEngine[INPUT, OUT] = {
 
-    new RuleEngine[INPUT, MARKER] {
-      this.leafs ++= seq
+    new RuleEngine[INPUT, OUT] {
+      this.nodes ++= seq
 
     }
 
@@ -29,34 +30,37 @@ object RuleEngine {
 }
 
 
-trait RuleEngine[INPUT, MARKER] {
+trait RuleEngine[INPUT, OUT] {
   self =>
 
 
   def firstFail(x: INPUT)
                (implicit
-                executionContext: ExecutionContext): Future[Option[MARKER]] = {
+                executionContext: ExecutionContext): Future[Option[OUT]] = {
+    EngineNode(this).firstFail(x)
+  }
 
-    def recursiveSearch(checks: immutable.Seq[RulesLeaf[INPUT, MARKER]]): Future[Option[MARKER]] = {
-      checks match {
-        case head +: tail =>
-          head.firstFail(x).flatMap {
-            case res@Some(_) => Future.successful(res)
-            case _ => recursiveSearch(tail)
-          }(FutureUtils.sameThreadExecutionContext)
-        case _ => Future.successful(None)
-      }
-    }
+  def collectFails(x: INPUT,
+                   parallelLevel: Int = 1)
+                  (implicit
+                   executionContext: ExecutionContext): Future[immutable.Seq[OUT]] = {
+    EngineNode(this).collectFails(x, parallelLevel)
+  }
 
-    try {
-      recursiveSearch(validationsList())
-    } catch {
-      case NonFatal(e) => Future.failed(e)
-    }
+
+  def collectSuccesses(x: INPUT,
+                       parallelLevel: Int = 1)
+                      (implicit executionContext: ExecutionContext): Future[immutable.Seq[OUT]] = {
+    EngineNode(this).collectSuccesses(x, parallelLevel)
+  }
+
+  def firstSuccess(x: INPUT)
+                  (implicit executionContext: ExecutionContext): Future[Option[OUT]] = {
+    EngineNode(this).firstSuccess(x)
   }
 
   def firstFailWith(x: INPUT)
-                   (markersToError: Option[MARKER] => Option[Throwable])
+                   (markersToError: Option[OUT] => Option[Throwable])
                    (implicit
                     executionContext: ExecutionContext): Future[Unit] = {
     firstFail(x).flatMap { markers =>
@@ -68,7 +72,7 @@ trait RuleEngine[INPUT, MARKER] {
   }
 
   def firstFailWithErr(x: INPUT)
-                      (markersToError: Option[MARKER] => Throwable)
+                      (markersToError: Option[OUT] => Throwable)
                       (implicit
                        executionContext: ExecutionContext): Future[Unit] = {
     firstFailWith(x)(res => Some(markersToError(res)))
@@ -76,7 +80,7 @@ trait RuleEngine[INPUT, MARKER] {
 
   def failWith(x: INPUT,
                parallelLevel: Int = 1)
-              (markersToError: immutable.Seq[MARKER] => Option[Throwable])
+              (markersToError: immutable.Seq[OUT] => Option[Throwable])
               (implicit
                executionContext: ExecutionContext): Future[Unit] = {
     collectFails(x, parallelLevel)
@@ -90,105 +94,66 @@ trait RuleEngine[INPUT, MARKER] {
 
   def failWithErr(x: INPUT,
                   parallelLevel: Int = 1)
-                 (markersToError: immutable.Seq[MARKER] => Throwable)
+                 (markersToError: immutable.Seq[OUT] => Throwable)
                  (implicit
                   executionContext: ExecutionContext): Future[Unit] = {
     failWith(x, parallelLevel)(res => Some(markersToError(res)))
   }
 
-  def collectFails(x: INPUT,
-                   parallelLevel: Int = 1)
-                  (implicit
-                   executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-
-    FutureUtils.batched(validationsList(), parallelLevel)(_.collectFails(x))
-      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
-  }
-
-
-  def collectSuccesses(x: INPUT,
-                       parallelLevel: Int = 1)
-                      (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-
-    FutureUtils.batched(validationsList(), parallelLevel)(_.collectSuccesses(x))
-      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
-  }
-
-  def firstSuccess(x: INPUT)
-                  (implicit executionContext: ExecutionContext): Future[Option[MARKER]] = {
-
-    def recursiveSearch(checks: immutable.Seq[RulesLeaf[INPUT, MARKER]]): Future[Option[MARKER]] = {
-      checks match {
-        case v +: tail =>
-          v.firstSuccess(x).flatMap {
-            case res@Some(_) => Future.successful(res)
-            case _ => recursiveSearch(tail)
-          }(FutureUtils.sameThreadExecutionContext)
-        case _ => Future.successful(None)
-      }
-    }
-
-    try {
-      recursiveSearch(validationsList())
-    } catch {
-      case NonFatal(e) => Future.failed(e)
-    }
-  }
-
   // nodes
 
-  def validationsList(): immutable.Seq[RulesLeaf[INPUT, MARKER]] = leafs.toList
+  def validationsList(): immutable.Seq[RulesNode[INPUT, OUT]] = nodes.result()
 
 
 
-  def contramap[B](f: B => INPUT): RuleEngine[B, MARKER] = {
-    RuleEngine.from(leafs.map(_.contramap(f)))
+  def contramap[B](f: B => INPUT): RuleEngine[B, OUT] = {
+    RuleEngine.from(validationsList().map(_.contramap(f)))
   }
 
-  def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RuleEngine[INPUT, NEW_MARKER] = {
-    RuleEngine.from(leafs.map(_.mapMarkers(f)))
+  def mapMarkers[NEW_MARKER](f: OUT => NEW_MARKER): RuleEngine[INPUT, NEW_MARKER] = {
+    RuleEngine.from(validationsList().map(_.mapMarkers(f)))
   }
 
-  def ++(other: RuleEngine[INPUT, MARKER]): RuleEngine[INPUT, MARKER] = {
-    RuleEngine.from(this.leafs ++ other.leafs)
+  def ++(other: RuleEngine[INPUT, OUT]): RuleEngine[INPUT, OUT] = {
+    RuleEngine.from(this.validationsList() ++ other.validationsList())
   }
 
-  protected def ruleAsync(marker: MARKER)
+  protected def ruleAsync(marker: OUT)
                          (block: INPUT => Future[Boolean]): Unit = {
-    leafs += AsyncCheckLeaf(AsyncRulesCheck(marker, block))
+    nodes += AsyncCheckNode(marker, block)
   }
 
-  protected def rule(marker: MARKER)
+  protected def rule(marker: OUT)
                     (block: INPUT => Boolean): Unit = {
-    leafs += SyncCheckLeaf(SyncRulesCheck(marker, block))
+    nodes += SyncCheckNode(marker, block)
   }
 
-  protected def register(v: RuleEngine[INPUT, MARKER]): Unit = {
-    leafs += EngineLeaf(v)
+  protected def register(v: RuleEngine[INPUT, OUT]): Unit = {
+    nodes += EngineNode(v)
   }
 
   protected def registerOnSeq[B](extract: INPUT => immutable.Seq[B])
-                                (v: RuleEngine[B, MARKER]): Unit = {
-    leafs += SeqEngineLeaf[INPUT, B, MARKER](v, extract)
+                                (v: RuleEngine[B, OUT]): Unit = {
+    nodes += SeqEngineNode[INPUT, B, OUT](v, extract)
   }
 
   protected def registerOnOpt[B](extract: INPUT => Option[B])
-                                (v: RuleEngine[B, MARKER]): Unit = {
-    leafs += OptEngineLeaf[INPUT, B, MARKER](v, extract)
+                                (v: RuleEngine[B, OUT]): Unit = {
+    nodes += OptEngineNode[INPUT, B, OUT](v, extract)
   }
 
 
-  protected def registerOnFunc[B](build: INPUT => RuleEngine[INPUT, MARKER]): Unit = {
-    leafs += BuildingEngineLeaf[INPUT, MARKER](build)
+  protected def registerOnFunc[B](build: INPUT => RuleEngine[INPUT, OUT]): Unit = {
+    nodes += BuildingEngineNode[INPUT, OUT](build)
   }
 
   protected def registerOnMapping[KEY](extract: INPUT => KEY)
-                                      (builders: (KEY, RuleEngine[INPUT, MARKER])*): Unit = {
+                                      (builders: (KEY, RuleEngine[INPUT, OUT])*): Unit = {
     val mapping = builders.groupBy { case (k, _) => k }
       .mapValues(validators => validators.map { case (_, v) => v }.reduce(_ ++ _))
       .map(identity) // remove laziness
 
-    val empty = RuleEngine.empty[INPUT, MARKER]
+    val empty = RuleEngine.empty[INPUT, OUT]
 
     registerOnFunc { obj =>
       val input = extract(obj)
@@ -197,8 +162,8 @@ trait RuleEngine[INPUT, MARKER] {
   }
 
   protected def registerPartial[B](extract: INPUT => B)
-                                  (builder: PartialFunction[B, RuleEngine[INPUT, MARKER]]): Unit = {
-    val empty = RuleEngine.empty[INPUT, MARKER]
+                                  (builder: PartialFunction[B, RuleEngine[INPUT, OUT]]): Unit = {
+    val empty = RuleEngine.empty[INPUT, OUT]
     registerOnFunc { obj =>
       val input = extract(obj)
       builder.applyOrElse(input, (_: B) => empty)
@@ -206,12 +171,12 @@ trait RuleEngine[INPUT, MARKER] {
   }
 
   protected def registerIf[B](test: INPUT => Boolean)
-                             (engine: RuleEngine[INPUT, MARKER]): Unit = {
+                             (engine: RuleEngine[INPUT, OUT]): Unit = {
     registerPartial(identity) {
       case obj if test(obj) => engine
     }
   }
 
 
-  protected val leafs = new ArrayBuffer[RulesLeaf[INPUT, MARKER]]()
+  protected val nodes = new VectorBuilder[RulesNode[INPUT, OUT]]()
 }

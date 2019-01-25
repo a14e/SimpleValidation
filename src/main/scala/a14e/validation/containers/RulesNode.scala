@@ -8,13 +8,14 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
 
-trait RulesLeaf[T, MARKER] {
+trait RulesNode[T, MARKER] {
 
-  def contramap[B](f: B => T): RulesLeaf[B, MARKER]
+  def contramap[B](f: B => T): RulesNode[B, MARKER]
 
-  def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesLeaf[T, NEW_MARKER]
+  def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesNode[T, NEW_MARKER]
 
-  def collectFails(x: T)
+  def collectFails(x: T,
+                   parallelLevel: Int = 1)
                   (implicit
                    executionContext: ExecutionContext): Future[immutable.Seq[MARKER]]
 
@@ -23,7 +24,8 @@ trait RulesLeaf[T, MARKER] {
                 executionContext: ExecutionContext): Future[Option[MARKER]]
 
 
-  def collectSuccesses(x: T)
+  def collectSuccesses(x: T,
+                       parallelLevel: Int = 1)
                       (implicit
                        executionContext: ExecutionContext): Future[immutable.Seq[MARKER]]
 
@@ -34,20 +36,22 @@ trait RulesLeaf[T, MARKER] {
 
 
 
-case class SyncCheckLeaf[T, MARKER](check: SyncRulesCheck[T, MARKER]) extends RulesLeaf[T, MARKER] {
+case class SyncCheckNode[T, MARKER](marker: MARKER,
+                                    check: T => Boolean) extends RulesNode[T, MARKER] {
 
-  override def contramap[B](f: B => T): SyncCheckLeaf[B, MARKER] = SyncCheckLeaf(check.contramap(f))
+  override def contramap[B](f: B => T): SyncCheckNode[B, MARKER] = this.copy(check = f andThen this.check)
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): SyncCheckLeaf[T, NEW_MARKER] = {
-    SyncCheckLeaf(check.copy(marker = f(check.marker)))
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): SyncCheckNode[T, NEW_MARKER] = {
+    this.copy(marker = f(marker))
   }
 
-  override def collectFails(x: T)
+  override def collectFails(x: T,
+                            parallelLevel: Int = 1)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
     try {
-      if (!check.check(x)) Future.successful(check.marker :: Nil)
+      if (!check(x)) Future.successful(marker :: Nil)
       else Future.successful(Nil)
     } catch {
       case NonFatal(e) => Future.failed(e)
@@ -58,18 +62,19 @@ case class SyncCheckLeaf[T, MARKER](check: SyncRulesCheck[T, MARKER]) extends Ru
                         (implicit
                          executionContext: ExecutionContext): Future[Option[MARKER]] = {
     try {
-      if (!check.check(x)) Future.successful(Some(check.marker))
+      if (!check(x)) Future.successful(Some(marker))
       else Future.successful(None)
     } catch {
       case NonFatal(e) => Future.failed(e)
     }
   }
-  override def collectSuccesses(x: T)
+  override def collectSuccesses(x: T,
+                                parallelLevel: Int = 1)
                                (implicit
                                 executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
     try {
-      if (check.check(x)) Future.successful(check.marker :: Nil)
+      if (check(x)) Future.successful(marker :: Nil)
       else Future.successful(Nil)
     } catch {
       case NonFatal(e) => Future.failed(e)
@@ -80,7 +85,7 @@ case class SyncCheckLeaf[T, MARKER](check: SyncRulesCheck[T, MARKER]) extends Ru
                            (implicit
                             executionContext: ExecutionContext): Future[Option[MARKER]] = {
     try {
-      if (check.check(x)) Future.successful(Some(check.marker))
+      if (check(x)) Future.successful(Some(marker))
       else Future.successful(None)
     } catch {
       case NonFatal(e) => Future.failed(e)
@@ -89,20 +94,22 @@ case class SyncCheckLeaf[T, MARKER](check: SyncRulesCheck[T, MARKER]) extends Ru
 }
 
 
-case class AsyncCheckLeaf[T, MARKER](check: AsyncRulesCheck[T, MARKER]) extends RulesLeaf[T, MARKER] {
+case class AsyncCheckNode[T, MARKER](marker: MARKER,
+                                     check: T => Future[Boolean]) extends RulesNode[T, MARKER] {
 
-  override def contramap[B](f: B => T): AsyncCheckLeaf[B, MARKER] = AsyncCheckLeaf(check.contramap(f))
+  override def contramap[B](f: B => T): AsyncCheckNode[B, MARKER] = this.copy(check = f andThen this.check)
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): AsyncCheckLeaf[T, NEW_MARKER] = {
-    AsyncCheckLeaf(check.copy(marker = f(check.marker)))
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): AsyncCheckNode[T, NEW_MARKER] = {
+    this.copy(marker = f(marker))
   }
 
-  override def collectFails(x: T)
+  override def collectFails(x: T,
+                            parallelLevel: Int = 1)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    check.check(x).map { r =>
-      if (!r) check.marker :: Nil
+    check(x).map { r =>
+      if (!r) marker :: Nil
       else Nil
     }(FutureUtils.sameThreadExecutionContext)
   }
@@ -110,18 +117,19 @@ case class AsyncCheckLeaf[T, MARKER](check: AsyncRulesCheck[T, MARKER]) extends 
   override def firstFail(x: T)
                         (implicit
                          executionContext: ExecutionContext): Future[Option[MARKER]] = {
-    check.check(x).map { r =>
-      if (!r) Some(check.marker)
+    check(x).map { r =>
+      if (!r) Some(marker)
       else None
     }(FutureUtils.sameThreadExecutionContext)
   }
-  override def collectSuccesses(x: T)
+  override def collectSuccesses(x: T,
+                                parallelLevel: Int = 1)
                                (implicit
                                 executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
 
-    check.check(x).map { r =>
-      if (r) check.marker :: Nil
+    check(x).map { r =>
+      if (r) marker :: Nil
       else Nil
     }(FutureUtils.sameThreadExecutionContext)
   }
@@ -129,62 +137,96 @@ case class AsyncCheckLeaf[T, MARKER](check: AsyncRulesCheck[T, MARKER]) extends 
   override def firstSuccess(x: T)
                            (implicit
                             executionContext: ExecutionContext): Future[Option[MARKER]] = {
-    check.check(x).map { r =>
-      if (r) Some(check.marker)
+    check(x).map { r =>
+      if (r) Some(marker)
       else None
     }(FutureUtils.sameThreadExecutionContext)
   }
 }
 
-case class EngineLeaf[T, MARKER](engine: RuleEngine[T,  MARKER]) extends RulesLeaf[T, MARKER] {
+case class EngineNode[T, MARKER](engine: RuleEngine[T,  MARKER]) extends RulesNode[T, MARKER] {
 
-  override def contramap[B](f: B => T): EngineLeaf[B, MARKER] = EngineLeaf(engine.contramap(f))
+  override def contramap[B](f: B => T): EngineNode[B, MARKER] = EngineNode(engine.contramap(f))
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesLeaf[T, NEW_MARKER] = {
-    EngineLeaf(engine.mapMarkers(f))
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesNode[T, NEW_MARKER] = {
+    EngineNode(engine.mapMarkers(f))
   }
 
-  override def collectFails(x: T)
+  override def collectFails(x: T,
+                            parallelLevel: Int = 1)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    engine.collectFails(x)
+    FutureUtils.batched(engine.validationsList(), parallelLevel)(_.collectFails(x))
+      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
   override def firstFail(x: T)
                         (implicit
                          executionContext: ExecutionContext): Future[Option[MARKER]] = {
-    engine.firstFail(x)
+    def recursiveSearch(checks: immutable.Seq[RulesNode[T, MARKER]]): Future[Option[MARKER]] = {
+      checks match {
+        case head +: tail =>
+          head.firstFail(x).flatMap {
+            case res@Some(_) => Future.successful(res)
+            case _ => recursiveSearch(tail)
+          }(FutureUtils.sameThreadExecutionContext)
+        case _ => Future.successful(None)
+      }
+    }
+
+    try {
+      recursiveSearch(engine.validationsList())
+    } catch {
+      case NonFatal(e) => Future.failed(e)
+    }
   }
-  override def collectSuccesses(x: T)
+  override def collectSuccesses(x: T,
+                                parallelLevel: Int = 1)
                                (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-
-    engine.collectSuccesses(x)
+    FutureUtils.batched(engine.validationsList(), parallelLevel)(_.collectSuccesses(x))
+      .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
   override def firstSuccess(x: T)
                            (implicit executionContext: ExecutionContext): Future[Option[MARKER]] = {
-    engine.firstSuccess(x)
+    def recursiveSearch(checks: immutable.Seq[RulesNode[T, MARKER]]): Future[Option[MARKER]] = {
+      checks match {
+        case v +: tail =>
+          v.firstSuccess(x).flatMap {
+            case res@Some(_) => Future.successful(res)
+            case _ => recursiveSearch(tail)
+          }(FutureUtils.sameThreadExecutionContext)
+        case _ => Future.successful(None)
+      }
+    }
+
+    try {
+      recursiveSearch(engine.validationsList())
+    } catch {
+      case NonFatal(e) => Future.failed(e)
+    }
   }
 }
 
-case class BuildingEngineLeaf[T, MARKER](build: T => RuleEngine[T, MARKER]) extends RulesLeaf[T, MARKER] {
+case class BuildingEngineNode[T, MARKER](build: T => RuleEngine[T, MARKER]) extends RulesNode[T, MARKER] {
 
-  override def contramap[B](f: B => T): BuildingEngineLeaf[B, MARKER] = {
-    BuildingEngineLeaf { x =>
+  override def contramap[B](f: B => T): BuildingEngineNode[B, MARKER] = {
+    BuildingEngineNode { x =>
       build(f(x)).contramap(f)
     }
   }
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesLeaf[T, NEW_MARKER] = {
-    BuildingEngineLeaf { x =>
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): RulesNode[T, NEW_MARKER] = {
+    BuildingEngineNode { x =>
       build(x).mapMarkers(f)
     }
   }
 
-  override def collectFails(x: T)
+  override def collectFails(x: T,
+                            parallelLevel: Int = 1)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    build(x).collectFails(x)
+    build(x).collectFails(x, parallelLevel)
   }
 
   override def firstFail(x: T)
@@ -192,9 +234,10 @@ case class BuildingEngineLeaf[T, MARKER](build: T => RuleEngine[T, MARKER]) exte
                          executionContext: ExecutionContext): Future[Option[MARKER]] = {
     build(x).firstFail(x)
   }
-  override def collectSuccesses(x: T)
+  override def collectSuccesses(x: T,
+                                parallelLevel: Int = 1)
                                (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    build(x).collectSuccesses(x)
+    build(x).collectSuccesses(x, parallelLevel)
   }
 
   override def firstSuccess(x: T)(implicit executionContext: ExecutionContext): Future[Option[MARKER]] = {
@@ -204,22 +247,23 @@ case class BuildingEngineLeaf[T, MARKER](build: T => RuleEngine[T, MARKER]) exte
 
 }
 
-case class SeqEngineLeaf[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
-                                           readSeq: T => immutable.Seq[ENTRY]) extends RulesLeaf[T, MARKER] {
+case class SeqEngineNode[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
+                                           readSeq: T => immutable.Seq[ENTRY]) extends RulesNode[T, MARKER] {
 
   override def contramap[B](f: B => T) = {
-    SeqEngineLeaf(engine, f andThen readSeq)
+    SeqEngineNode(engine, f andThen readSeq)
   }
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): SeqEngineLeaf[T, ENTRY, NEW_MARKER] = {
-    SeqEngineLeaf(engine.mapMarkers(f), readSeq)
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): SeqEngineNode[T, ENTRY, NEW_MARKER] = {
+    SeqEngineNode(engine.mapMarkers(f), readSeq)
   }
 
-  override def collectFails(x: T)
+  override def collectFails(x: T,
+                            parallelLevel: Int = 1)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
-    FutureUtils.serially(readSeq(x))(engine.collectFails(_))
+    FutureUtils.serially(readSeq(x))(engine.collectFails(_, parallelLevel))
       .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
@@ -227,22 +271,23 @@ case class SeqEngineLeaf[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
                         (implicit
                          executionContext: ExecutionContext): Future[Option[MARKER]] = {
 
-    def recFind(xs: Seq[ENTRY]): Future[Option[MARKER]] = xs match {
+    def recursieveSearch(xs: Seq[ENTRY]): Future[Option[MARKER]] = xs match {
       case head +: tail =>
         engine.firstFail(head).flatMap {
           case s@Some(_) => Future.successful(s)
-          case _ => recFind(tail)
+          case _ => recursieveSearch(tail)
         }(FutureUtils.sameThreadExecutionContext)
       case _ => Future.successful(None)
     }
 
     val seq = readSeq(x)
-    recFind(seq)
+    recursieveSearch(seq)
   }
 
-  override def collectSuccesses(x: T)
+  override def collectSuccesses(x: T,
+                                parallelLevel: Int = 1)
                                (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    FutureUtils.serially(readSeq(x))(engine.collectSuccesses(_))
+    FutureUtils.serially(readSeq(x))(engine.collectSuccesses(_, parallelLevel))
       .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
@@ -264,23 +309,24 @@ case class SeqEngineLeaf[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
 
 }
 
-case class OptEngineLeaf[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
-                                           readOpt: T => Option[ENTRY]) extends RulesLeaf[T, MARKER] {
+case class OptEngineNode[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
+                                           readOpt: T => Option[ENTRY]) extends RulesNode[T, MARKER] {
 
-  override def contramap[B](f: B => T): OptEngineLeaf[B, ENTRY, MARKER] = {
-    OptEngineLeaf(engine, f.andThen(readOpt))
+  override def contramap[B](f: B => T): OptEngineNode[B, ENTRY, MARKER] = {
+    OptEngineNode(engine, f.andThen(readOpt))
   }
 
-  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): OptEngineLeaf[T, ENTRY, NEW_MARKER] = {
-    OptEngineLeaf(engine.mapMarkers(f), readOpt)
+  override def mapMarkers[NEW_MARKER](f: MARKER => NEW_MARKER): OptEngineNode[T, ENTRY, NEW_MARKER] = {
+    OptEngineNode(engine.mapMarkers(f), readOpt)
   }
 
-  override def collectFails(in: T)
+  override def collectFails(in: T,
+                            parallelLevel: Int = 1)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
     readOpt(in) match {
-      case Some(value) => engine.collectFails(value)
+      case Some(value) => engine.collectFails(value, parallelLevel)
       case None => Future.successful(Nil)
     }
   }
@@ -293,13 +339,14 @@ case class OptEngineLeaf[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
       case None => Future.successful(None)
     }
   }
-  override def collectSuccesses(in: T)
+  override def collectSuccesses(in: T,
+                                parallelLevel: Int = 1)
                                (implicit
                                 executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
 
 
     readOpt(in) match {
-      case Some(value) => engine.collectSuccesses(value)
+      case Some(value) => engine.collectSuccesses(value, parallelLevel)
       case None => Future.successful(Nil)
     }
   }
