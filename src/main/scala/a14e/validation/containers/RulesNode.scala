@@ -156,7 +156,7 @@ case class EngineNode[T, MARKER](engine: RuleEngine[T,  MARKER]) extends RulesNo
                             parallelLevel: Int = 1)
                            (implicit
                             executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    FutureUtils.batched(engine.validationsList(), parallelLevel)(_.collectFails(x))
+    FutureUtils.batched(engine.rules(), parallelLevel)(_.collectFails(x))
       .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
@@ -175,7 +175,7 @@ case class EngineNode[T, MARKER](engine: RuleEngine[T,  MARKER]) extends RulesNo
     }
 
     try {
-      recursiveSearch(engine.validationsList())
+      recursiveSearch(engine.rules())
     } catch {
       case NonFatal(e) => Future.failed(e)
     }
@@ -183,7 +183,7 @@ case class EngineNode[T, MARKER](engine: RuleEngine[T,  MARKER]) extends RulesNo
   override def collectSuccesses(x: T,
                                 parallelLevel: Int = 1)
                                (implicit executionContext: ExecutionContext): Future[immutable.Seq[MARKER]] = {
-    FutureUtils.batched(engine.validationsList(), parallelLevel)(_.collectSuccesses(x))
+    FutureUtils.batched(engine.rules(), parallelLevel)(_.collectSuccesses(x))
       .map(_.flatten)(FutureUtils.sameThreadExecutionContext)
   }
 
@@ -201,7 +201,7 @@ case class EngineNode[T, MARKER](engine: RuleEngine[T,  MARKER]) extends RulesNo
     }
 
     try {
-      recursiveSearch(engine.validationsList())
+      recursiveSearch(engine.rules())
     } catch {
       case NonFatal(e) => Future.failed(e)
     }
@@ -250,7 +250,7 @@ case class BuildingEngineNode[T, MARKER](build: T => RuleEngine[T, MARKER]) exte
 case class SeqEngineNode[T, ENTRY, MARKER](engine: RuleEngine[ENTRY, MARKER],
                                            readSeq: T => immutable.Seq[ENTRY]) extends RulesNode[T, MARKER] {
 
-  override def contramap[B](f: B => T) = {
+  override def contramap[B](f: B => T): SeqEngineNode[B, ENTRY, MARKER] = {
     SeqEngineNode(engine, f andThen readSeq)
   }
 

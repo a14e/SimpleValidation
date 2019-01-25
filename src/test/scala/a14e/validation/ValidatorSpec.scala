@@ -6,12 +6,12 @@ import a14e.validation.results.TextResult
 import scala.collection.immutable
 import scala.concurrent.Future
 
-class RuleEngineSpec extends DefaultSpec {
+class ValidatorSpec extends DefaultSpec {
 
 
   "firstFail" should "work none rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
     }
 
@@ -21,7 +21,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work single rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       rule("error") { str => str != "123" }
     }
 
@@ -33,7 +33,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work multiple rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       rule("error") { str => str != "123" }
       rule("error1") { str => str != "345" }
     }
@@ -47,7 +47,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with async rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       ruleAsync("error") { str =>
         Future(str != "123")
       }
@@ -61,7 +61,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with multiple async rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       ruleAsync("error") { str =>
         Future(str != "123")
       }
@@ -82,12 +82,12 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class User(name: String)
 
-    class InnerValidator extends RuleEngine[String, TextResult] {
+    class InnerValidator extends Validator[String, TextResult] {
       rule("error") { str => str != "123" }
       ruleAsync("error1") { str => Future(str != "345") }
     }
 
-    class TestValidator extends RuleEngine[User, TextResult] {
+    class TestValidator extends Validator[User, TextResult] {
       register {
         new InnerValidator().contramap(_.name)
       }
@@ -104,12 +104,12 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class Tags(tags: immutable.Seq[String])
 
-    class InnerValidator extends RuleEngine[String, TextResult] {
+    class InnerValidator extends Validator[String, TextResult] {
       rule("error") { str => str != "123" }
       ruleAsync("error1") { str => Future(str != "345") }
     }
 
-    class TestValidator extends RuleEngine[Tags, TextResult] {
+    class TestValidator extends Validator[Tags, TextResult] {
       registerOnSeq(_.tags) {
         new InnerValidator()
       }
@@ -129,12 +129,12 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class User(name: Option[String])
 
-    class InnerValidator extends RuleEngine[String, TextResult] {
+    class InnerValidator extends Validator[String, TextResult] {
       rule("error") { str => str != "123" }
       ruleAsync("error1") { str => Future(str != "345") }
     }
 
-    class TestValidator extends RuleEngine[User, TextResult] {
+    class TestValidator extends Validator[User, TextResult] {
       registerOnOpt(_.name) {
         new InnerValidator()
       }
@@ -155,15 +155,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnFunc {
         case Animal(_, "cat") => new CatValidator().contramap(_.sound)
         case Animal(_, "dog") => new DogValidator().contramap(_.sound)
@@ -183,15 +183,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnMapping(_.`type`)(
         "cat" -> new CatValidator().contramap(_.sound),
         "dog" -> new DogValidator().contramap(_.sound)
@@ -212,15 +212,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerPartial(_.`type`) {
         case "cat" => new CatValidator().contramap(_.sound)
         case "dog" => new DogValidator().contramap(_.sound)
@@ -241,15 +241,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerIf(_.`type` == "cat") {
         new CatValidator().contramap(_.sound)
       }
@@ -269,7 +269,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   "collectFails" should "work with none rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
       rule("123") { str => str != "456" }
 
     }
@@ -279,7 +279,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work single rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
 
       rule("starts with 1") { str => !str.startsWith("1") }
@@ -294,7 +294,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work multiple rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
       rule("ends with 2") { str => !str.endsWith("2") }
 
@@ -312,7 +312,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with async rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
 
       ruleAsync("starts with 1") { str => Future(!str.startsWith("1")) }
@@ -326,7 +326,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with multiple async rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(!str.endsWith("2")) }
 
@@ -343,14 +343,14 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with nested Validators" in new Wiring {
 
-    class InnerValidator extends RuleEngine[String, String] {
+    class InnerValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(!str.endsWith("2")) }
 
       ruleAsync("starts with 1") { str => Future(!str.startsWith("1")) }
     }
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
       register {
         new InnerValidator
@@ -369,14 +369,14 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class Numbers(numbers: List[String])
 
-    class InnerValidator extends RuleEngine[String, String] {
+    class InnerValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(!str.endsWith("2")) }
 
       ruleAsync("starts with 1") { str => Future(!str.startsWith("1")) }
     }
 
-    class TestValidator extends RuleEngine[Numbers, String] {
+    class TestValidator extends Validator[Numbers, String] {
 
       registerOnSeq(_.numbers) {
         new InnerValidator
@@ -395,14 +395,14 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class Number(number: Option[String])
 
-    class InnerValidator extends RuleEngine[String, String] {
+    class InnerValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(!str.endsWith("2")) }
 
       ruleAsync("starts with 1") { str => Future(!str.startsWith("1")) }
     }
 
-    class TestValidator extends RuleEngine[Number, String] {
+    class TestValidator extends Validator[Number, String] {
 
       registerOnOpt(_.number) {
         new InnerValidator
@@ -423,15 +423,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnFunc {
         case Animal(_, "cat") => new CatValidator().contramap(_.sound)
         case Animal(_, "dog") => new DogValidator().contramap(_.sound)
@@ -451,15 +451,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnMapping(_.`type`)(
         "cat" -> new CatValidator().contramap(_.sound),
         "dog" -> new DogValidator().contramap(_.sound)
@@ -480,15 +480,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerPartial(_.`type`) {
         case "cat" => new CatValidator().contramap(_.sound)
         case "dog" => new DogValidator().contramap(_.sound)
@@ -509,15 +509,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str == "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str == "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerIf(_.`type` == "cat") {
         new CatValidator().contramap(_.sound)
       }
@@ -537,7 +537,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   "collectSuccesses" should "work with none rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
       rule("123") { str => str == "456" }
 
     }
@@ -547,7 +547,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work single rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
 
       rule("starts with 1") { str => str.startsWith("1") }
@@ -562,7 +562,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work multiple rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
       rule("ends with 2") { str => str.endsWith("2") }
 
@@ -580,7 +580,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with async rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
 
       ruleAsync("starts with 1") { str => Future(str.startsWith("1")) }
@@ -594,7 +594,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with multiple async rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(str.endsWith("2")) }
 
@@ -611,14 +611,14 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with nested Validators" in new Wiring {
 
-    class InnerValidator extends RuleEngine[String, String] {
+    class InnerValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(str.endsWith("2")) }
 
       ruleAsync("starts with 1") { str => Future(str.startsWith("1")) }
     }
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
       register {
         new InnerValidator
@@ -637,14 +637,14 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class Numbers(numbers: List[String])
 
-    class InnerValidator extends RuleEngine[String, String] {
+    class InnerValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(str.endsWith("2")) }
 
       ruleAsync("starts with 1") { str => Future(str.startsWith("1")) }
     }
 
-    class TestValidator extends RuleEngine[Numbers, String] {
+    class TestValidator extends Validator[Numbers, String] {
 
       registerOnSeq(_.numbers) {
         new InnerValidator
@@ -663,14 +663,14 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class Number(number: Option[String])
 
-    class InnerValidator extends RuleEngine[String, String] {
+    class InnerValidator extends Validator[String, String] {
 
       ruleAsync("ends with 2") { str => Future(str.endsWith("2")) }
 
       ruleAsync("starts with 1") { str => Future(str.startsWith("1")) }
     }
 
-    class TestValidator extends RuleEngine[Number, String] {
+    class TestValidator extends Validator[Number, String] {
 
       registerOnOpt(_.number) {
         new InnerValidator
@@ -691,15 +691,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str != "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str != "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnFunc {
         case Animal(_, "cat") => new CatValidator().contramap(_.sound)
         case Animal(_, "dog") => new DogValidator().contramap(_.sound)
@@ -719,15 +719,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str != "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str != "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnMapping(_.`type`)(
         "cat" -> new CatValidator().contramap(_.sound),
         "dog" -> new DogValidator().contramap(_.sound)
@@ -748,15 +748,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str != "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str != "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerPartial(_.`type`) {
         case "cat" => new CatValidator().contramap(_.sound)
         case "dog" => new DogValidator().contramap(_.sound)
@@ -777,15 +777,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str != "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str != "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerIf(_.`type` == "cat") {
         new CatValidator().contramap(_.sound)
       }
@@ -805,7 +805,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   "firstSuccess" should "work none rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, String] {
+    class TestValidator extends Validator[String, String] {
 
     }
 
@@ -815,7 +815,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work single rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       rule("error") { str => str == "123" }
     }
 
@@ -827,7 +827,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work multiple rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       rule("error") { str => str == "123" }
       rule("error1") { str => str == "345" }
     }
@@ -841,7 +841,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with async rule" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       ruleAsync("error") { str =>
         Future(str == "123")
       }
@@ -855,7 +855,7 @@ class RuleEngineSpec extends DefaultSpec {
 
   it should "work with multiple async rules" in new Wiring {
 
-    class TestValidator extends RuleEngine[String, TextResult] {
+    class TestValidator extends Validator[String, TextResult] {
       ruleAsync("error") { str =>
         Future(str == "123")
       }
@@ -876,12 +876,12 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class User(name: String)
 
-    class InnerValidator extends RuleEngine[String, TextResult] {
+    class InnerValidator extends Validator[String, TextResult] {
       rule("error") { str => str == "123" }
       ruleAsync("error1") { str => Future(str == "345") }
     }
 
-    class TestValidator extends RuleEngine[User, TextResult] {
+    class TestValidator extends Validator[User, TextResult] {
       register {
         new InnerValidator().contramap(_.name)
       }
@@ -898,12 +898,12 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class Tags(tags: immutable.Seq[String])
 
-    class InnerValidator extends RuleEngine[String, TextResult] {
+    class InnerValidator extends Validator[String, TextResult] {
       rule("error") { str => str == "123" }
       ruleAsync("error1") { str => Future(str == "345") }
     }
 
-    class TestValidator extends RuleEngine[Tags, TextResult] {
+    class TestValidator extends Validator[Tags, TextResult] {
       registerOnSeq(_.tags) {
         new InnerValidator()
       }
@@ -923,12 +923,12 @@ class RuleEngineSpec extends DefaultSpec {
 
     case class User(name: Option[String])
 
-    class InnerValidator extends RuleEngine[String, TextResult] {
+    class InnerValidator extends Validator[String, TextResult] {
       rule("error") { str => str == "123" }
       ruleAsync("error1") { str => Future(str == "345") }
     }
 
-    class TestValidator extends RuleEngine[User, TextResult] {
+    class TestValidator extends Validator[User, TextResult] {
       registerOnOpt(_.name) {
         new InnerValidator()
       }
@@ -949,15 +949,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str != "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str != "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnFunc {
         case Animal(_, "cat") => new CatValidator().contramap(_.sound)
         case Animal(_, "dog") => new DogValidator().contramap(_.sound)
@@ -978,15 +978,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str != "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str != "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerOnMapping(_.`type`)(
         "cat" -> new CatValidator().contramap(_.sound),
         "dog" -> new DogValidator().contramap(_.sound)
@@ -1007,15 +1007,15 @@ class RuleEngineSpec extends DefaultSpec {
     case class Animal(sound: String,
                       `type`: String)
 
-    class CatValidator extends RuleEngine[String, TextResult] {
+    class CatValidator extends Validator[String, TextResult] {
       rule("bad cat") { str => str != "meow" }
     }
 
-    class DogValidator extends RuleEngine[String, TextResult] {
+    class DogValidator extends Validator[String, TextResult] {
       ruleAsync("bad dog") { str => Future(str != "woof") }
     }
 
-    class TestValidator extends RuleEngine[Animal, TextResult] {
+    class TestValidator extends Validator[Animal, TextResult] {
       registerPartial(_.`type`) {
         case "cat" => new CatValidator().contramap(_.sound)
         case "dog" => new DogValidator().contramap(_.sound)
@@ -1033,13 +1033,13 @@ class RuleEngineSpec extends DefaultSpec {
 
   "++" should "merge checks" in new Wiring {
 
-    class TestValidator1 extends RuleEngine[String, TextResult] {
+    class TestValidator1 extends Validator[String, TextResult] {
       rule("error") { str =>
         str != "123"
       }
     }
 
-    class TestValidator2 extends RuleEngine[String, TextResult] {
+    class TestValidator2 extends Validator[String, TextResult] {
       ruleAsync("error1") { str =>
         Future(str != "345")
       }
