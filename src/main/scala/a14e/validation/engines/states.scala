@@ -46,14 +46,14 @@ trait MutableRulesEngine[INPUT, OUT] extends RulesEngine[INPUT, OUT] {
 
   def rules(): immutable.Seq[RulesNode[INPUT, OUT]] = nodes.result()
 
-  protected def ruleAsync(marker: OUT)
+  protected def ruleAsync(out: OutWrapper)
                          (block: INPUT => Future[Boolean]): Unit = {
-    nodes += AsyncCheckNode(marker, block)
+    nodes += AsyncCheckNode(out.outBuilder, block)
   }
 
-  protected def rule(marker: OUT)
+  protected def rule(out: OutWrapper)
                     (block: INPUT => Boolean): Unit = {
-    nodes += SyncCheckNode(marker, block)
+    nodes += SyncCheckNode(out.outBuilder, block)
   }
 
   protected def register(v: RulesNode[INPUT, OUT]): Unit = {
@@ -61,12 +61,12 @@ trait MutableRulesEngine[INPUT, OUT] extends RulesEngine[INPUT, OUT] {
   }
 
   protected def registerOnSeq[ENTRY](extract: INPUT => immutable.Seq[ENTRY])
-                                (v: RulesNode[ENTRY, OUT]): Unit = {
+                                    (v: RulesNode[ENTRY, OUT]): Unit = {
     nodes += SeqNestedNode(v, extract)
   }
 
   protected def registerOnOpt[ENTRY](extract: INPUT => Option[ENTRY])
-                                (v: RulesNode[ENTRY, OUT]): Unit = {
+                                    (v: RulesNode[ENTRY, OUT]): Unit = {
     nodes += OptNestedNode(v, extract)
   }
 
@@ -85,7 +85,7 @@ trait MutableRulesEngine[INPUT, OUT] extends RulesEngine[INPUT, OUT] {
 
   protected def registerIf[B](test: INPUT => Boolean)
                              (engine: RulesNode[INPUT, OUT]): Unit = {
-    val empty =  RulesEngine.empty[INPUT, OUT]
+    val empty = RulesEngine.empty[INPUT, OUT]
     registerOnFunc { obj =>
       if (test(obj)) engine
       else empty
@@ -93,5 +93,24 @@ trait MutableRulesEngine[INPUT, OUT] extends RulesEngine[INPUT, OUT] {
   }
 
   protected val nodes = new ListBuffer[RulesNode[INPUT, OUT]]()
+
+
+  trait OutWrapper {
+    def outBuilder(in: INPUT): OUT
+  }
+
+  implicit def idOutToWrapper[B](x: B)
+                                (implicit conv: B => OUT): OutWrapper = new OutWrapper {
+    val cached: OUT = conv(x)
+
+    override final def outBuilder(in: INPUT): OUT = cached
+  }
+
+
+  implicit def funcToOutWrapper[B](f: INPUT => B)
+                                  (implicit conv: B => OUT): OutWrapper = new OutWrapper {
+    override final def outBuilder(in: INPUT): OUT = conv(f(in))
+  }
+
 
 }

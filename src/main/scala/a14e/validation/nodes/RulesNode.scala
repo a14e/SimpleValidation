@@ -82,7 +82,7 @@ trait RulesNode[IN, OUT] {
   }
 }
 
-case class SyncCheckNode[IN, OUT](out: OUT,
+case class SyncCheckNode[IN, OUT](out: IN => OUT,
                                   check: IN => Boolean) extends RulesNode[IN, OUT] {
   override def collectFails(x: IN,
                             parallelLevel: Int = 1)
@@ -90,7 +90,7 @@ case class SyncCheckNode[IN, OUT](out: OUT,
                             executionContext: ExecutionContext): Future[immutable.Seq[OUT]] = {
 
     try {
-      if (!check(x)) Future.successful(out :: Nil)
+      if (!check(x)) Future.successful(out(x) :: Nil)
       else Future.successful(Nil)
     } catch {
       case NonFatal(e) => Future.failed(e)
@@ -101,7 +101,7 @@ case class SyncCheckNode[IN, OUT](out: OUT,
                         (implicit
                          executionContext: ExecutionContext): Future[Option[OUT]] = {
     try {
-      if (!check(x)) Future.successful(Some(out))
+      if (!check(x)) Future.successful(Some(out(x)))
       else Future.successful(None)
     } catch {
       case NonFatal(e) => Future.failed(e)
@@ -114,7 +114,7 @@ case class SyncCheckNode[IN, OUT](out: OUT,
                                 executionContext: ExecutionContext): Future[immutable.Seq[OUT]] = {
 
     try {
-      if (check(x)) Future.successful(out :: Nil)
+      if (check(x)) Future.successful(out(x) :: Nil)
       else Future.successful(Nil)
     } catch {
       case NonFatal(e) => Future.failed(e)
@@ -125,7 +125,7 @@ case class SyncCheckNode[IN, OUT](out: OUT,
                            (implicit
                             executionContext: ExecutionContext): Future[Option[OUT]] = {
     try {
-      if (check(x)) Future.successful(Some(out))
+      if (check(x)) Future.successful(Some(out(x)))
       else Future.successful(None)
     } catch {
       case NonFatal(e) => Future.failed(e)
@@ -134,7 +134,7 @@ case class SyncCheckNode[IN, OUT](out: OUT,
 }
 
 
-case class AsyncCheckNode[IN, OUT](out: OUT,
+case class AsyncCheckNode[IN, OUT](out: IN => OUT,
                                    check: IN => Future[Boolean]) extends RulesNode[IN, OUT] {
 
   override def collectFails(x: IN,
@@ -143,7 +143,7 @@ case class AsyncCheckNode[IN, OUT](out: OUT,
                             executionContext: ExecutionContext): Future[immutable.Seq[OUT]] = {
 
     check(x).map { r =>
-      if (!r) out :: Nil
+      if (!r) out(x) :: Nil
       else Nil
     }(FutureUtils.sameThreadExecutionContext)
   }
@@ -152,7 +152,7 @@ case class AsyncCheckNode[IN, OUT](out: OUT,
                         (implicit
                          executionContext: ExecutionContext): Future[Option[OUT]] = {
     check(x).map { r =>
-      if (!r) Some(out)
+      if (!r) Some(out(x))
       else None
     }(FutureUtils.sameThreadExecutionContext)
   }
@@ -164,7 +164,7 @@ case class AsyncCheckNode[IN, OUT](out: OUT,
 
 
     check(x).map { r =>
-      if (r) out :: Nil
+      if (r) out(x) :: Nil
       else Nil
     }(FutureUtils.sameThreadExecutionContext)
   }
@@ -173,7 +173,7 @@ case class AsyncCheckNode[IN, OUT](out: OUT,
                            (implicit
                             executionContext: ExecutionContext): Future[Option[OUT]] = {
     check(x).map { r =>
-      if (r) Some(out)
+      if (r) Some(out(x))
       else None
     }(FutureUtils.sameThreadExecutionContext)
   }

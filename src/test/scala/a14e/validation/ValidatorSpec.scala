@@ -36,6 +36,8 @@ class ValidatorSpec extends DefaultSpec {
     class TestValidator extends Validator[String, TextResult] {
       rule("error") { str => str != "123" }
       rule("error1") { str => str != "345" }
+
+      rule("error1") { str => str != "345" }
     }
 
     new TestValidator().firstFail("234").futureValue shouldBe None
