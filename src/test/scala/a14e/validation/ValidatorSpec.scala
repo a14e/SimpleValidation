@@ -178,34 +178,6 @@ class ValidatorSpec extends DefaultSpec {
   }
 
 
-  it should "work with mapping validators" in new Wiring {
-
-    case class Animal(sound: String,
-                      `type`: String)
-
-    class CatValidator extends Validator[String, TextResult] {
-      rule("bad cat") { str => str == "meow" }
-    }
-
-    class DogValidator extends Validator[String, TextResult] {
-      ruleAsync("bad dog") { str => Future(str == "woof") }
-    }
-
-    class TestValidator extends Validator[Animal, TextResult] {
-      registerOnMapping(_.`type`)(
-        "cat" -> new CatValidator().contramap(_.sound),
-        "dog" -> new DogValidator().contramap(_.sound)
-      )
-    }
-
-    new TestValidator().firstFail(Animal("meow", "cat")).futureValue shouldBe None
-    new TestValidator().firstFail(Animal("woof", "dog")).futureValue shouldBe None
-
-    new TestValidator().firstFail(Animal("meow", "dog")).futureValue shouldBe Some(TextResult("bad dog"))
-    new TestValidator().firstFail(Animal("woof", "cat")).futureValue shouldBe Some(TextResult("bad cat"))
-
-  }
-
 
   it should "work with partial validators" in new Wiring {
 
@@ -445,34 +417,6 @@ class ValidatorSpec extends DefaultSpec {
     new TestValidator().collectFails(Animal("woof", "cat")).futureValue shouldBe TextResult("bad cat") :: Nil
   }
 
-
-  it should "work with mapping validators" in new Wiring {
-
-    case class Animal(sound: String,
-                      `type`: String)
-
-    class CatValidator extends Validator[String, TextResult] {
-      rule("bad cat") { str => str == "meow" }
-    }
-
-    class DogValidator extends Validator[String, TextResult] {
-      ruleAsync("bad dog") { str => Future(str == "woof") }
-    }
-
-    class TestValidator extends Validator[Animal, TextResult] {
-      registerOnMapping(_.`type`)(
-        "cat" -> new CatValidator().contramap(_.sound),
-        "dog" -> new DogValidator().contramap(_.sound)
-      )
-    }
-
-    new TestValidator().collectFails(Animal("meow", "cat")).futureValue shouldBe Nil
-    new TestValidator().collectFails(Animal("woof", "dog")).futureValue shouldBe Nil
-
-    new TestValidator().collectFails(Animal("meow", "dog")).futureValue shouldBe TextResult("bad dog") :: Nil
-    new TestValidator().collectFails(Animal("woof", "cat")).futureValue shouldBe TextResult("bad cat") :: Nil
-
-  }
 
 
   it should "work with partial validators" in new Wiring {
@@ -714,34 +658,6 @@ class ValidatorSpec extends DefaultSpec {
   }
 
 
-  it should "work with mapping validators" in new Wiring {
-
-    case class Animal(sound: String,
-                      `type`: String)
-
-    class CatValidator extends Validator[String, TextResult] {
-      rule("bad cat") { str => str != "meow" }
-    }
-
-    class DogValidator extends Validator[String, TextResult] {
-      ruleAsync("bad dog") { str => Future(str != "woof") }
-    }
-
-    class TestValidator extends Validator[Animal, TextResult] {
-      registerOnMapping(_.`type`)(
-        "cat" -> new CatValidator().contramap(_.sound),
-        "dog" -> new DogValidator().contramap(_.sound)
-      )
-    }
-
-    new TestValidator().collectSuccesses(Animal("meow", "cat")).futureValue shouldBe Nil
-    new TestValidator().collectSuccesses(Animal("woof", "dog")).futureValue shouldBe Nil
-
-    new TestValidator().collectSuccesses(Animal("meow", "dog")).futureValue shouldBe TextResult("bad dog") :: Nil
-    new TestValidator().collectSuccesses(Animal("woof", "cat")).futureValue shouldBe TextResult("bad cat") :: Nil
-
-  }
-
 
   it should "work with partial validators" in new Wiring {
 
@@ -962,35 +878,6 @@ class ValidatorSpec extends DefaultSpec {
         case Animal(_, "cat") => new CatValidator().contramap(_.sound)
         case Animal(_, "dog") => new DogValidator().contramap(_.sound)
       }
-    }
-
-    new TestValidator().firstSuccess(Animal("meow", "cat")).futureValue shouldBe None
-    new TestValidator().firstSuccess(Animal("woof", "dog")).futureValue shouldBe None
-
-    new TestValidator().firstSuccess(Animal("meow", "dog")).futureValue shouldBe Some(TextResult("bad dog"))
-    new TestValidator().firstSuccess(Animal("woof", "cat")).futureValue shouldBe Some(TextResult("bad cat"))
-
-  }
-
-
-  it should "work with mapping validators" in new Wiring {
-
-    case class Animal(sound: String,
-                      `type`: String)
-
-    class CatValidator extends Validator[String, TextResult] {
-      rule("bad cat") { str => str != "meow" }
-    }
-
-    class DogValidator extends Validator[String, TextResult] {
-      ruleAsync("bad dog") { str => Future(str != "woof") }
-    }
-
-    class TestValidator extends Validator[Animal, TextResult] {
-      registerOnMapping(_.`type`)(
-        "cat" -> new CatValidator().contramap(_.sound),
-        "dog" -> new DogValidator().contramap(_.sound)
-      )
     }
 
     new TestValidator().firstSuccess(Animal("meow", "cat")).futureValue shouldBe None

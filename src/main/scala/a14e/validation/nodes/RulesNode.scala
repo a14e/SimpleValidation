@@ -1,6 +1,6 @@
 package a14e.validation.nodes
 
-import a14e.validation.engines.RuleEngine
+import a14e.validation.engines.RulesEngine
 import a14e.validation.utils.FutureUtils
 
 import scala.collection.immutable
@@ -9,41 +9,78 @@ import scala.language.implicitConversions
 import scala.util.control.NonFatal
 
 
-trait RulesNode[T, OUT] {
+trait RulesNode[IN, OUT] {
+  self =>
 
-  def collectFails(x: T,
+
+  def collectFails(x: IN,
                    parallelLevel: Int = 1)
                   (implicit
                    executionContext: ExecutionContext): Future[immutable.Seq[OUT]]
 
-  def firstFail(x: T)
+  def firstFail(x: IN)
                (implicit
                 executionContext: ExecutionContext): Future[Option[OUT]]
 
 
-  def collectSuccesses(x: T,
+  def collectSuccesses(x: IN,
                        parallelLevel: Int = 1)
                       (implicit
                        executionContext: ExecutionContext): Future[immutable.Seq[OUT]]
 
-  def firstSuccess(x: T)
+  def firstSuccess(x: IN)
                   (implicit
                    executionContext: ExecutionContext): Future[Option[OUT]]
-}
 
 
-object RulesNode {
-  def merge[IN, OUT](nodes: immutable.Seq[RulesNode[IN, OUT]]): RulesNode[IN, OUT] = {
-    nodes match {
-      case Seq() => RuleEngine.empty[IN, IN, OUT, OUT](identity, identity)
-      case Seq(x) => x
-      case _ =>
+  def contramap[B](f: B => IN): RulesNode[B, OUT] = new RulesNode[B, OUT] {
+    override def collectFails(x: B,
+                              parallelLevel: Int)
+                             (implicit executionContext: ExecutionContext): Future[immutable.Seq[OUT]] = {
+      self.collectFails(f(x), parallelLevel)
+    }
 
-        RuleEngine.from[IN, IN, OUT, OUT](nodes, identity, identity)
+    override def firstFail(x: B)
+                          (implicit executionContext: ExecutionContext): Future[Option[OUT]] = {
+      self.firstFail(f(x))
+    }
+
+    override def collectSuccesses(x: B,
+                                  parallelLevel: Int)
+                                 (implicit executionContext: ExecutionContext): Future[immutable.Seq[OUT]] = {
+      self.collectSuccesses(f(x), parallelLevel)
+    }
+
+    override def firstSuccess(x: B)
+                             (implicit executionContext: ExecutionContext): Future[Option[OUT]] = {
+      self.firstSuccess(f(x))
+    }
+  }
+
+  def map[OUT2](f: OUT => OUT2): RulesNode[IN, OUT2] = new RulesNode[IN, OUT2] {
+    override def collectFails(x: IN,
+                              parallelLevel: Int)
+                             (implicit executionContext: ExecutionContext): Future[immutable.Seq[OUT2]] = {
+      self.collectFails(x, parallelLevel).map(_.map(f))(FutureUtils.sameThreadExecutionContext)
+    }
+
+    override def firstFail(x: IN)
+                          (implicit executionContext: ExecutionContext): Future[Option[OUT2]] = {
+      self.firstFail(x).map(_.map(f))(FutureUtils.sameThreadExecutionContext)
+    }
+
+    override def collectSuccesses(x: IN,
+                                  parallelLevel: Int)
+                                 (implicit executionContext: ExecutionContext): Future[immutable.Seq[OUT2]] = {
+      self.collectSuccesses(x, parallelLevel).map(_.map(f))(FutureUtils.sameThreadExecutionContext)
+    }
+
+    override def firstSuccess(x: IN)
+                             (implicit executionContext: ExecutionContext): Future[Option[OUT2]] = {
+      self.firstSuccess(x).map(_.map(f))(FutureUtils.sameThreadExecutionContext)
     }
   }
 }
-
 
 case class SyncCheckNode[IN, OUT](out: OUT,
                                   check: IN => Boolean) extends RulesNode[IN, OUT] {
@@ -98,7 +135,7 @@ case class SyncCheckNode[IN, OUT](out: OUT,
 
 
 case class AsyncCheckNode[IN, OUT](out: OUT,
-                                  check: IN => Future[Boolean]) extends RulesNode[IN, OUT] {
+                                   check: IN => Future[Boolean]) extends RulesNode[IN, OUT] {
 
   override def collectFails(x: IN,
                             parallelLevel: Int = 1)
@@ -172,7 +209,7 @@ case class BuildingNode[T, OUT](build: T => RulesNode[T, OUT]) extends RulesNode
 }
 
 case class SeqNestedNode[T, ENTRY, OUT](engine: RulesNode[ENTRY, OUT],
-                                        readSeq: T => immutable.Seq[ENTRY]) extends RulesNode[T, OUT] {
+                                        readSeq: T => Seq[ENTRY]) extends RulesNode[T, OUT] {
 
   override def collectFails(x: T,
                             parallelLevel: Int = 1)

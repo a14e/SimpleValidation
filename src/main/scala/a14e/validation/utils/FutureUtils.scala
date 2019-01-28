@@ -9,7 +9,7 @@ private[validation] object FutureUtils {
   /**
     * executes futures one by one
     **/
-  def serially[T, B](xs: immutable.Seq[T])
+  def serially[T, B](xs: Seq[T])
                     (f: T => Future[B]): Future[immutable.Seq[B]] = {
     implicit val ctx: ExecutionContext = sameThreadExecutionContext
 
@@ -22,7 +22,7 @@ private[validation] object FutureUtils {
   }
 
 
-  def batched[T, B](xs: immutable.Seq[T], batchSize: Int)
+  def batched[T, B](xs: Seq[T], batchSize: Int)
                    (f: T => Future[B])
                    (implicit ctx: ExecutionContext): Future[immutable.Seq[B]] = {
 
